@@ -1,0 +1,63 @@
+---
+name: Update BentoPDF
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+
+      - name: Get Latest BentoPDF Release
+        id: get_release
+        run: |
+          RELEASE_JSON=$(curl -s https://api.github.com/repos/alam00000/bentopdf/releases/latest)
+          URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name | contains("simple")) | .browser_download_url')
+          if [ -z "$URL" ]; then
+            exit 1
+          fi
+          echo "url=$URL" >> $GITHUB_OUTPUT
+
+      - name: Download and Extract
+        run: |
+          curl -L ${{ steps.get_release.outputs.url }} -o bento.zip
+          mkdir bentoPDF
+          unzip -o bento.zip -d bento_new
+          rm bento.zip
+          cp CNAME bento_new/ || true
+          touch bento_new/.nojekyll
+
+      - name: Checkout Current Pages
+        uses: actions/checkout@v5
+        with:
+          ref: gh-pages
+          path: bento_old
+        continue-on-error: true
+
+      - name: Compare Changes
+        id: check_changes
+        run: |
+          if diff -qbr bento_new/ bento_old/ >/dev/null 2>&1; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No changes detected. Skipping deploy."
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Changes detected. Proceeding to deploy."
+          fi
+
+      - name: Deploy to GitHub Pages Branch
+        if: steps.check_changes.outputs.changed == 'true'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./bento_new
+          publish_branch: gh-pages
+          force_orphan: true
+...
